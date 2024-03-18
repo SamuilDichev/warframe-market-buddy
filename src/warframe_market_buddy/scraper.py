@@ -1,13 +1,14 @@
-import asyncio
-from collections import deque
-import configparser
 import argparse
-import aiohttp
+import asyncio
+import configparser
+from collections import deque
 from urllib.parse import urljoin
-from models import Item
 
-from constants import WARFRAME_MARKET_ITEMS
-from db import AsyncDatabaseConnection
+import aiohttp
+
+from warframe_market_buddy.constants import WARFRAME_MARKET_ITEMS
+from warframe_market_buddy.db import AsyncDatabaseConnection
+from warframe_market_buddy.models import Item
 
 
 class Scraper:

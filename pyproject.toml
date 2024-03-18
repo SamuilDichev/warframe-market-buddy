@@ -10,6 +10,25 @@ python = "^3.12"
 aiohttp = "^3.9"
 asyncpg = "^0.29"
 
+[tool.poetry.group.dev.dependencies]
+black = "^24.3"
+isort = "^5.13"
+flake8 = "^7.0"
+Flake8-pyproject = "^1.2"
+mypy = "^1.9"
+asyncpg-stubs = "^0.29"
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.flake8]
+max-line-length = 120
+exclude = ".git,venv"
 
 [build-system]
 requires = ["poetry-core"]
