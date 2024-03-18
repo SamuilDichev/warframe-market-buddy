@@ -1,8 +1,8 @@
-import argparse
 import asyncio
-import configparser
 import logging
+import os
 from collections import deque
+from typing import Dict
 from urllib.parse import urljoin
 
 import aiohttp
@@ -61,18 +61,16 @@ class Scraper:
 
 
 class Writer:
-    def __init__(self, item_input_queue: asyncio.Queue, host: str, port: int, user: str, database: str):
+    def __init__(self, item_input_queue: asyncio.Queue, **db_kwargs: Dict):
         self._item_input_queue = item_input_queue
         self._stop_event = asyncio.Event()
         self.stopped_event = asyncio.Event()
-        self._host = host
-        self._port = port
-        self._user = user
-        self._database = database
+        self._db_kwargs = db_kwargs
 
     async def run(self):
         processed_items = 0
-        async with AsyncDatabaseConnection(self._host, self._port, self._user, self._database) as conn:
+        LOGGER.info("Starting writer with db_kwargs %s", self._db_kwargs)
+        async with AsyncDatabaseConnection(**self._db_kwargs) as conn:
             while not (self._stop_event.is_set() and self._item_input_queue.empty()):
                 item = await self._item_input_queue.get()
                 processed_items += 1
@@ -99,10 +97,10 @@ class Writer:
         self._stop_event.set()
 
 
-async def main(db_config):
+async def main(db_kwargs):
     item_queue = asyncio.Queue()
     scraper = Scraper(item_queue)
-    writer = Writer(item_queue, db_config["Host"], db_config["Port"], db_config["User"], db_config["Database"])
+    writer = Writer(item_queue, **db_kwargs)
 
     scraper_task = asyncio.create_task(scraper.run())
     writer_task = asyncio.create_task(writer.run())
@@ -117,12 +115,8 @@ async def main(db_config):
 if __name__ == "__main__":
     setup_logging(root_level=logging.INFO)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", required=True, help="path to config file")
-    args = parser.parse_args()
+    database_url = os.environ["DATABASE_URL"]
+    assert database_url, "Need to set DATABASE_URL env var to a postgresql dsn"
+    db_kwargs = {"dsn": database_url}
 
-    config = configparser.ConfigParser()
-    config.read(args.config)
-
-    db_config = config["DB"]
-    asyncio.run(main(db_config))
+    asyncio.run(main(db_kwargs))
