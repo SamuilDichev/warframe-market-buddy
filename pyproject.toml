@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "warframe-market-buddy"
+version = "0.1.0"
+description = "Warframe Market deal finder"
+authors = ["SamuilDichev <samkata00@abv.bg>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiohttp = "^3.9"
+asyncpg = "^0.29"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
