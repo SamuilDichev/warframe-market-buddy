@@ -1,0 +1,28 @@
+version: "3.8"
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_DB: wfmarketbuddy
+      POSTGRES_USER: wfmarketbuddy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+    depends_on:
+      - db
+    restart: on-failure
+
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: wfmarketbuddy
+      POSTGRES_USER: wfmarketbuddy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init_schema.sql:/docker-entrypoint-initdb.d/init_schema.sql
+
+volumes:
+  postgres_data:

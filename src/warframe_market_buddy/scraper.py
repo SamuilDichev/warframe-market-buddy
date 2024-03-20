@@ -24,12 +24,15 @@ class Scraper:
             r = await response.json()
             return r["data"]
 
-    async def run(self):
+    async def run(self, already_stored_items=set()):
         LOGGER.info("Starting scraper")
         async with aiohttp.ClientSession() as session:
             all_items = await self.get_data(session, WARFRAME_MARKET_ITEMS)
-            LOGGER.info("Got a list of %s items", len(all_items))
+            # Start with items we haven't already stored, i.e. new items, then proceed to update old ones after that
+            all_items.sort(key=lambda x: x["urlName"] in already_stored_items)
             all_items = deque(all_items)
+
+            LOGGER.info("Got a list of %s items. Items to skip: %s", len(all_items), len(already_stored_items))
 
             processed_items = 0
             while all_items:
@@ -51,25 +54,30 @@ class Scraper:
                 full_item = Item(
                     item_details["i18n"]["en"]["name"],
                     item_details["urlName"],
-                    item_details["i18n"]["en"]["wikiLink"],
+                    item_details["i18n"]["en"].get("wikiLink"),
                     item_details["tradable"],
-                    item_details["tradingTax"],
+                    item_details.get("tradingTax"),
                     item_details.get("ducats"),
                 )
                 self.item_output_queue.put_nowait(full_item)
                 LOGGER.debug("Success scraping %s", item_sub_url)
 
 
-class Writer:
+class ItemPersistence:
     def __init__(self, item_input_queue: asyncio.Queue, **db_kwargs: Dict):
         self._item_input_queue = item_input_queue
         self._stop_event = asyncio.Event()
         self.stopped_event = asyncio.Event()
         self._db_kwargs = db_kwargs
 
+    async def get_existing_items(self):
+        async with AsyncDatabaseConnection(**self._db_kwargs) as conn:
+            items = await conn.fetch("SELECT url_name FROM items")
+            return {item["url_name"] for item in items}
+
     async def run(self):
         processed_items = 0
-        LOGGER.info("Starting writer with db_kwargs %s", self._db_kwargs)
+        LOGGER.info("Starting item persistence")
         async with AsyncDatabaseConnection(**self._db_kwargs) as conn:
             while not (self._stop_event.is_set() and self._item_input_queue.empty()):
                 item = await self._item_input_queue.get()
@@ -82,6 +90,12 @@ class Writer:
                     """
                     INSERT INTO items(name, url_name, wiki_url, tradable, trading_tax, ducats)
                     VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (url_name) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    wiki_url = EXCLUDED.wiki_url,
+                    tradable = EXCLUDED.tradable,
+                    trading_tax = EXCLUDED.trading_tax,
+                    ducats = EXCLUDED.ducats;
                     """,
                     item.name,
                     item.url_name,
@@ -100,23 +114,35 @@ class Writer:
 async def main(db_kwargs):
     item_queue = asyncio.Queue()
     scraper = Scraper(item_queue)
-    writer = Writer(item_queue, **db_kwargs)
+    item_persistence = ItemPersistence(item_queue, **db_kwargs)
 
-    scraper_task = asyncio.create_task(scraper.run())
-    writer_task = asyncio.create_task(writer.run())
+    stored_url_names = await item_persistence.get_existing_items()
+    scraper_task = asyncio.create_task(scraper.run(stored_url_names))
+    writer_task = asyncio.create_task(item_persistence.run())
 
     done, pending = await asyncio.wait([scraper_task, writer_task], return_when=asyncio.FIRST_COMPLETED)
     assert scraper_task in done and writer_task in pending, "Something went wrong"
+    for task in done | pending:
+        if (exception := task.exception()) is not None:
+            raise exception
 
-    writer.stop()
-    await writer.stopped_event.wait()
+    LOGGER.info("Finishing up scraping. Done %s, pending %s", done, pending)
+
+    item_persistence.stop()
+    await item_persistence.stopped_event.wait()
+    LOGGER.info("Scraping and writing both done")
 
 
 if __name__ == "__main__":
     setup_logging(root_level=logging.INFO)
 
-    database_url = os.environ["DATABASE_URL"]
-    assert database_url, "Need to set DATABASE_URL env var to a postgresql dsn"
+    postgres_user = os.environ["POSTGRES_USER"]
+    postgres_pass = os.environ["POSTGRES_PASSWORD"]
+    postgres_host = os.environ["POSTGRES_HOST"]
+    postgres_port = os.environ["POSTGRES_PORT"]
+    postgres_db = os.environ["POSTGRES_DB"]
+
+    database_url = f"postgresql://{postgres_user}:{postgres_pass}@{postgres_host}:{postgres_port}/{postgres_db}"
     db_kwargs = {"dsn": database_url}
 
     asyncio.run(main(db_kwargs))
